@@ -2,7 +2,8 @@ from transformers import AutoTokenizer
 
 tokenizer = AutoTokenizer.from_pretrained("unsloth/Llama-3.2-1B")
 
-text = "This is a test. The first of many, and not the only."
+text = "Tokenizasyon, gereksiz veya 123456 gibi alışılmadık kelimeler için basit değildir."
+
 
 token_ids = tokenizer.encode(text)
 print("Token IDs:", token_ids)
