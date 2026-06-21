@@ -8,12 +8,12 @@ Usage:
     python Token_Counter.py                         # built-in sample text
     python Token_Counter.py "some text here"        # tokenize a string
     python Token_Counter.py path/to/file.txt        # tokenize a file
+    python Token_Counter.py "text" --md             # output Markdown table
 """
 
 import sys
 import os
 
-# Force UTF-8 output on Windows so Turkish/non-ASCII chars don't break cp1252
 os.environ.setdefault("PYTHONUTF8", "1")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -46,14 +46,13 @@ console = Console(highlight=False)
 
 
 def count_tokens_ollama(model: str, text: str) -> int:
-    """Return the raw token count for text under the given Ollama model."""
     resp = requests.post(
         OLLAMA_URL,
         json={
             "model": model,
             "prompt": text,
             "stream": False,
-            "raw": True,          # skip chat template — count only input tokens
+            "raw": True,
             "options": {"num_predict": 1},
         },
         timeout=120,
@@ -63,7 +62,6 @@ def count_tokens_ollama(model: str, text: str) -> int:
 
 
 def run_all(text: str) -> list[tuple[str, int | str]]:
-    """Query all models in parallel; return (model, count_or_error) list."""
     results: dict[str, int | str] = {}
 
     def query(model: str):
@@ -78,11 +76,15 @@ def run_all(text: str) -> list[tuple[str, int | str]]:
             model, result = future.result()
             results[model] = result
 
-    # Return in original MODELS order
     return [(m, results[m]) for m in MODELS]
 
 
-def print_table(text: str, results: list[tuple[str, int | str]]) -> None:
+def print_rich(text: str, source: str, results: list[tuple[str, int | str]]) -> None:
+    console.print(f"\n[bold]Source:[/bold] {source}")
+    console.print(f"[bold]Length:[/bold] {len(text)} characters")
+    console.print(f"[bold]Text:[/bold] {text[:120]}{'...' if len(text) > 120 else ''}\n")
+    console.print("[dim]Querying Ollama models in parallel...[/dim]\n")
+
     table = Table(title="Token Count per Ollama Model", show_lines=True)
     table.add_column("Model", style="cyan", no_wrap=True)
     table.add_column("Tokens", justify="right", style="bold green")
@@ -94,13 +96,25 @@ def print_table(text: str, results: list[tuple[str, int | str]]) -> None:
             table.add_row(model, f"[red]{count}[/red]")
 
     console.print(table)
-    console.print(
-        "[dim]Note: counts include the BOS token (off by 1 vs raw subword count).[/dim]\n"
-    )
+    console.print("[dim]Note: counts include the BOS token (off by 1 vs raw subword count).[/dim]\n")
+
+
+def print_md(text: str, source: str, results: list[tuple[str, int | str]]) -> None:
+    print(f"## Token Count Results\n")
+    print(f"**Source:** {source}  ")
+    print(f"**Length:** {len(text)} characters  ")
+    print(f"**Text:** `{text[:120]}{'...' if len(text) > 120 else ''}`\n")
+    print("| Model | Tokens |")
+    print("|-------|-------:|")
+    for model, count in results:
+        print(f"| `{model}` | {count} |")
+    print("\n> Note: counts include the BOS token (off by 1 vs raw subword count).")
 
 
 def main() -> None:
     args = sys.argv[1:]
+    md = "--md" in args
+    args = [a for a in args if a != "--md"]
 
     if args:
         candidate = Path(args[0])
@@ -114,15 +128,15 @@ def main() -> None:
         text = SAMPLE_TEXT
         source = "built-in sample"
 
-    console.print(f"\n[bold]Source:[/bold] {source}")
-    console.print(f"[bold]Length:[/bold] {len(text)} characters")
-    console.print(
-        f"[bold]Text:[/bold] {text[:120]}{'...' if len(text) > 120 else ''}\n"
-    )
+    if not md:
+        console.print("[dim]Querying Ollama models in parallel...[/dim]")
 
-    console.print("[dim]Querying Ollama models in parallel...[/dim]\n")
     results = run_all(text)
-    print_table(text, results)
+
+    if md:
+        print_md(text, source, results)
+    else:
+        print_rich(text, source, results)
 
 
 if __name__ == "__main__":

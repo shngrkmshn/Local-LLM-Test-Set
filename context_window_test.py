@@ -10,6 +10,7 @@ Usage:
     python context_window_test.py --models llama3.2:1b phi3:mini
     python context_window_test.py --lengths 500 5000            # skip 15k
     python context_window_test.py --positions middle            # only test middle
+    python context_window_test.py --md                          # Markdown output
 """
 
 import sys
@@ -35,14 +36,17 @@ from rich import box
 NEEDLE = "The secret passphrase is ZEPHYR-4291."
 NEEDLE_QUESTION = "What is the secret passphrase mentioned in the document?"
 
-DEFAULT_MODELS = [
-    "qwen2.5:14b-instruct-q4_K_M",
-    "gemma2:9b",
-    "llama3.1:8b-instruct-q8_0",
-    "mistral:7b-instruct-q8_0",
-    "llama3.2:1b",
-    "phi3:mini",
-]
+# Model name → (parameter count, disk size on this machine)
+MODEL_INFO: dict[str, tuple[str, str]] = {
+    "qwen2.5:14b-instruct-q4_K_M": ("14B", "8 GB"),
+    "gemma2:9b":                    ("9B",  "5 GB"),
+    "llama3.1:8b-instruct-q8_0":   ("8B",  "7 GB"),
+    "mistral:7b-instruct-q8_0":    ("7B",  "7 GB"),
+    "llama3.2:1b":                  ("1B",  "1 GB"),
+    "phi3:mini":                    ("3.8B","2 GB"),
+}
+
+DEFAULT_MODELS = list(MODEL_INFO.keys())
 
 DEFAULT_LENGTHS = [500, 5000, 15_000]   # approximate word counts
 DEFAULT_POSITIONS = ["start", "middle", "end"]
@@ -149,14 +153,14 @@ def ask_model(model: str, document: str) -> tuple[bool, str]:
             model=model,
             prompt=prompt,
             options={
-                "num_predict": 80,
+                "num_predict": 150,
                 "num_ctx": estimated_tokens,
                 "temperature": 0,
             },
         )
         response = result.response.strip()
         found = "ZEPHYR-4291" in response
-        snippet = response[:120].replace("\n", " ")
+        snippet = response.replace("\n", " ")
         return found, snippet
     except Exception as exc:
         return False, f"ERROR: {exc}"
@@ -172,57 +176,103 @@ def parse_args():
     parser.add_argument("--lengths", nargs="+", type=int, default=DEFAULT_LENGTHS, metavar="WORDS")
     parser.add_argument("--positions", nargs="+", default=DEFAULT_POSITIONS,
                         choices=["start", "middle", "end"], metavar="POS")
+    parser.add_argument("--md", action="store_true", help="Output Markdown instead of Rich tables")
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    console = Console(highlight=False)
-
-    console.print(f"\n[bold]Needle:[/bold] [yellow]{NEEDLE}[/yellow]")
-    console.print(f"[bold]Question:[/bold] {NEEDLE_QUESTION}\n")
-    console.print(f"[dim]Models:    {', '.join(args.models)}[/dim]")
-    console.print(f"[dim]Lengths:   {args.lengths} words[/dim]")
-    console.print(f"[dim]Positions: {args.positions}[/dim]\n")
-
-    # Pre-build all documents so we don't rebuild per model
+def collect_results(args) -> dict[str, list[tuple[int, str, bool, str]]]:
+    """Run all queries and return {model: [(actual_words, position, found, snippet)]}."""
     docs: dict[tuple[int, str], str] = {}
     for length in args.lengths:
         for pos in args.positions:
             docs[(length, pos)] = build_document(length, pos)
 
+    all_results: dict[str, list[tuple[int, str, bool, str]]] = {}
     for model in args.models:
-        console.rule(f"[bold cyan]{model}[/bold cyan]")
-
-        table = Table(box=box.SIMPLE_HEAD, show_lines=False)
-        table.add_column("Words", justify="right", style="dim")
-        table.add_column("Position", style="dim")
-        table.add_column("Found?", justify="center")
-        table.add_column("Model response (truncated)")
-
+        rows = []
         for length in args.lengths:
             for pos in args.positions:
                 doc = docs[(length, pos)]
                 actual_words = len(doc.split())
-
-                console.print(
-                    f"  [dim]Testing {actual_words:,} words, needle at {pos}...[/dim]",
-                    end="\r",
-                )
-
                 found, snippet = ask_model(model, doc)
+                rows.append((actual_words, pos, found, snippet))
+        all_results[model] = rows
+    return all_results
 
-                found_display = "[bold green]YES[/bold green]" if found else "[bold red]NO[/bold red]"
-                if "ERROR" in snippet:
-                    found_display = "[yellow]ERR[/yellow]"
 
-                table.add_row(f"{actual_words:,}", pos, found_display, snippet)
+def print_rich(args, all_results: dict) -> None:
+    console = Console(highlight=False)
 
-        console.print(" " * 60, end="\r")   # clear progress line
+    console.print(f"\n[bold]Needle:[/bold] [yellow]{NEEDLE}[/yellow]")
+    console.print(f"[bold]Question:[/bold] {NEEDLE_QUESTION}\n")
+
+    ref = Table(title="Models Under Test", box=box.SIMPLE_HEAD, show_lines=False)
+    ref.add_column("Model", style="cyan")
+    ref.add_column("Params", justify="right")
+    ref.add_column("Disk", justify="right")
+    for m in args.models:
+        params, size = MODEL_INFO.get(m, ("?", "?"))
+        ref.add_row(m, params, size)
+    console.print(ref)
+    console.print(f"[dim]Lengths:   {args.lengths} words[/dim]")
+    console.print(f"[dim]Positions: {args.positions}[/dim]\n")
+
+    for model, rows in all_results.items():
+        console.rule(f"[bold cyan]{model}[/bold cyan]")
+        table = Table(box=box.SIMPLE_HEAD, show_lines=False)
+        table.add_column("Words", justify="right", style="dim")
+        table.add_column("Position", style="dim")
+        table.add_column("Found?", justify="center")
+        table.add_column("Model response", max_width=72)
+        for actual_words, pos, found, snippet in rows:
+            found_display = "[bold green]YES[/bold green]" if found else "[bold red]NO[/bold red]"
+            if "ERROR" in snippet:
+                found_display = "[yellow]ERR[/yellow]"
+            table.add_row(f"{actual_words:,}", pos, found_display, snippet)
         console.print(table)
         console.print()
 
     console.print("[bold]Done.[/bold]  YES = model recalled ZEPHYR-4291 | NO = lost it | ERR = context overflow\n")
+
+
+def print_md(args, all_results: dict) -> None:
+    print("## Lost-in-the-Middle: Context Window Test\n")
+    print(f"**Needle:** `{NEEDLE}`  ")
+    print(f"**Question:** {NEEDLE_QUESTION}\n")
+
+    print("### Models Under Test\n")
+    print("| Model | Params | Disk |")
+    print("|-------|-------:|-----:|")
+    for m in args.models:
+        params, size = MODEL_INFO.get(m, ("?", "?"))
+        print(f"| `{m}` | {params} | {size} |")
+
+    print()
+    for model, rows in all_results.items():
+        print(f"\n### {model}\n")
+        print("| Words | Position | Found? | Model Response |")
+        print("|------:|----------|:------:|----------------|")
+        for actual_words, pos, found, snippet in rows:
+            found_str = "YES" if found else ("ERR" if "ERROR" in snippet else "NO")
+            safe = snippet.replace("|", "\\|")
+            print(f"| {actual_words:,} | {pos} | {found_str} | {safe} |")
+
+    print("\n> YES = recalled ZEPHYR-4291 | NO = lost it | ERR = context overflow")
+
+
+def main():
+    args = parse_args()
+
+    if not args.md:
+        console = Console(highlight=False)
+        console.print("[dim]Building documents and querying models...[/dim]")
+
+    all_results = collect_results(args)
+
+    if args.md:
+        print_md(args, all_results)
+    else:
+        print_rich(args, all_results)
 
 
 if __name__ == "__main__":
