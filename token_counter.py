@@ -13,6 +13,10 @@ Usage:
 
 import sys
 import os
+import io
+import contextlib
+from datetime import datetime
+from pathlib import Path
 
 os.environ.setdefault("PYTHONUTF8", "1")
 if hasattr(sys.stdout, "reconfigure"):
@@ -137,6 +141,15 @@ def main() -> None:
         print_md(text, source, results)
     else:
         print_rich(text, source, results)
+
+    out_dir = Path("outputs")
+    out_dir.mkdir(exist_ok=True)
+    path = out_dir / f"token_counter_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        print_md(text, source, results)
+    path.write_text(buf.getvalue(), encoding="utf-8")
+    console.print(f"[dim]Saved → {path}[/dim]")
 
 
 if __name__ == "__main__":

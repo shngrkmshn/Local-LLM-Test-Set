@@ -17,6 +17,10 @@ import sys
 import os
 import argparse
 import textwrap
+import io
+import contextlib
+from datetime import datetime
+from pathlib import Path
 
 os.environ.setdefault("PYTHONUTF8", "1")
 if hasattr(sys.stdout, "reconfigure"):
@@ -133,13 +137,14 @@ def build_document(target_words: int, position: str) -> str:
 # Ollama query
 # ---------------------------------------------------------------------------
 
-def ask_model(model: str, document: str) -> tuple[bool, str]:
+def ask_model(model: str, document: str, num_ctx: int | None = None) -> tuple[bool, str]:
     """
     Send document + question to the model. Returns (found_needle, response_snippet).
-    Sets num_ctx dynamically based on estimated token count.
+    If num_ctx is None, estimates from document length (original behaviour).
     """
     word_count = len(document.split())
     estimated_tokens = int(word_count / WORDS_PER_TOKEN) + 512   # buffer for prompt + response
+    ctx = num_ctx if num_ctx is not None else estimated_tokens
 
     prompt = (
         f"{document}\n\n"
@@ -154,7 +159,7 @@ def ask_model(model: str, document: str) -> tuple[bool, str]:
             prompt=prompt,
             options={
                 "num_predict": 150,
-                "num_ctx": estimated_tokens,
+                "num_ctx": ctx,
                 "temperature": 0,
             },
         )
@@ -177,6 +182,12 @@ def parse_args():
     parser.add_argument("--positions", nargs="+", default=DEFAULT_POSITIONS,
                         choices=["start", "middle", "end"], metavar="POS")
     parser.add_argument("--md", action="store_true", help="Output Markdown instead of Rich tables")
+    parser.add_argument(
+        "--num-ctx", type=int, default=None, metavar="TOKENS",
+        help="Fix num_ctx to this value for every query instead of estimating from document length. "
+             "Example: --num-ctx 32768. Useful for testing a specific context window size. "
+             "With a 16 GB VRAM GPU, 32768 is a safe start; 65536 is feasible for smaller models.",
+    )
     return parser.parse_args()
 
 
@@ -194,7 +205,7 @@ def collect_results(args) -> dict[str, list[tuple[int, str, bool, str]]]:
             for pos in args.positions:
                 doc = docs[(length, pos)]
                 actual_words = len(doc.split())
-                found, snippet = ask_model(model, doc)
+                found, snippet = ask_model(model, doc, num_ctx=args.num_ctx)
                 rows.append((actual_words, pos, found, snippet))
         all_results[model] = rows
     return all_results
@@ -260,6 +271,14 @@ def print_md(args, all_results: dict) -> None:
     print("\n> YES = recalled ZEPHYR-4291 | NO = lost it | ERR = context overflow")
 
 
+def _save_md(prefix: str, content: str) -> None:
+    out_dir = Path("outputs")
+    out_dir.mkdir(exist_ok=True)
+    path = out_dir / f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    path.write_text(content, encoding="utf-8")
+    Console(highlight=False).print(f"[dim]Saved → {path}[/dim]")
+
+
 def main():
     args = parse_args()
 
@@ -273,6 +292,11 @@ def main():
         print_md(args, all_results)
     else:
         print_rich(args, all_results)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        print_md(args, all_results)
+    _save_md("context_window_test", buf.getvalue())
 
 
 if __name__ == "__main__":
