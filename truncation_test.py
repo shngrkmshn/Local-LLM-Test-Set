@@ -130,6 +130,16 @@ def print_rich(actual_words: int, estimated_tokens: int, rows: list[dict]) -> No
     console.print(f"[dim]Doc: ~{actual_words:,} words | ~{estimated_tokens:,} estimated tokens[/dim]")
     console.print(f"[dim]Ollama default context is typically 2 048–4 096 tokens.[/dim]\n")
 
+    ref = Table(title="Models Under Test", box=box.SIMPLE_HEAD, show_lines=False)
+    ref.add_column("Model", style="cyan")
+    ref.add_column("Params", justify="right")
+    ref.add_column("Disk", justify="right")
+    for r in rows:
+        params, size = MODEL_INFO.get(r["model"], ("?", "?"))
+        ref.add_row(r["model"], params, size)
+    console.print(ref)
+    console.print()
+
     table = Table(box=box.SIMPLE_HEAD, show_lines=False)
     table.add_column("Model", style="cyan")
     table.add_column("Est. tokens", justify="right", style="dim")
@@ -170,12 +180,22 @@ def to_md(actual_words: int, estimated_tokens: int, rows: list[dict]) -> str:
         f"**Doc:** ~{actual_words:,} words | ~{estimated_tokens:,} estimated tokens  ",
         "**Setup:** No `num_ctx` set — needle at START of document  ",
         "**Ollama default context:** typically 2 048–4 096 tokens\n",
-        "| Model | Est. tokens | Evaluated | Coverage | Truncated? | Needle found? | Response snippet |",
-        "|-------|------------:|----------:|---------:|:----------:|:-------------:|-----------------|",
+        "### Models Under Test\n",
+        "| Model | Params | Disk |",
+        "|-------|-------:|-----:|",
+    ]
+    for r in rows:
+        params, size = MODEL_INFO.get(r["model"], ("?", "?"))
+        lines.append(f"| `{r['model']}` | {params} | {size} |")
+    lines += [
+        "\n### Results\n",
+        "| Model | Params | Est. tokens | Evaluated | Coverage | Truncated? | Needle found? | Response snippet |",
+        "|-------|-------:|------------:|----------:|---------:|:----------:|:-------------:|-----------------|",
     ]
     for r in rows:
         if r["error"]:
-            lines.append(f"| `{r['model']}` | {r['estimated_tokens']:,} | — | — | ERR | ERR | {r['error'][:80]} |")
+            params, _ = MODEL_INFO.get(r["model"], ("?", "?"))
+            lines.append(f"| `{r['model']}` | {params} | {r['estimated_tokens']:,} | — | — | ERR | ERR | {r['error'][:80]} |")
             continue
         ev = r["evaluated_tokens"]
         ratio = r["ratio"]
@@ -185,7 +205,8 @@ def to_md(actual_words: int, estimated_tokens: int, rows: list[dict]) -> str:
         found = "YES" if r["found"] else "NO"
         ev_str = f"{ev:,}" if ev is not None else "N/A"
         snippet = r["snippet"].replace("|", "\\|")[:120]
-        lines.append(f"| `{r['model']}` | {r['estimated_tokens']:,} | {ev_str} | {coverage} | {truncated} | {found} | {snippet} |")
+        params, _ = MODEL_INFO.get(r["model"], ("?", "?"))
+        lines.append(f"| `{r['model']}` | {params} | {r['estimated_tokens']:,} | {ev_str} | {coverage} | {truncated} | {found} | {snippet} |")
     lines.append("\n> Coverage = evaluated / estimated. Below ~85% → truncated. N/A = prompt_eval_count not returned.")
     return "\n".join(lines) + "\n"
 

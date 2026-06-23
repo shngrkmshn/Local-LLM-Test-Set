@@ -32,14 +32,16 @@ from rich.table import Table
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-MODELS = [
-    "qwen2.5:14b-instruct-q4_K_M",
-    "gemma2:9b",
-    "llama3.1:8b-instruct-q8_0",
-    "mistral:7b-instruct-q8_0",
-    "llama3.2:1b",
-    "phi3:mini",
-]
+MODEL_INFO: dict[str, tuple[str, str]] = {
+    "qwen2.5:14b-instruct-q4_K_M": ("14B", "8 GB"),
+    "gemma2:9b":                    ("9B",  "5 GB"),
+    "llama3.1:8b-instruct-q8_0":   ("8B",  "7 GB"),
+    "mistral:7b-instruct-q8_0":    ("7B",  "7 GB"),
+    "llama3.2:1b":                  ("1B",  "1 GB"),
+    "phi3:mini":                    ("3.8B","2 GB"),
+}
+
+MODELS = list(MODEL_INFO.keys())
 
 SAMPLE_TEXT = (
     "Tokenizasyon, gereksiz veya 123456 gibi alışılmadık kelimeler için basit değildir. "
@@ -87,17 +89,27 @@ def print_rich(text: str, source: str, results: list[tuple[str, int | str]]) -> 
     console.print(f"\n[bold]Source:[/bold] {source}")
     console.print(f"[bold]Length:[/bold] {len(text)} characters")
     console.print(f"[bold]Text:[/bold] {text[:120]}{'...' if len(text) > 120 else ''}\n")
-    console.print("[dim]Querying Ollama models in parallel...[/dim]\n")
+
+    ref = Table(title="Models Under Test", show_lines=False)
+    ref.add_column("Model", style="cyan", no_wrap=True)
+    ref.add_column("Params", justify="right")
+    ref.add_column("Disk", justify="right")
+    for model, _ in results:
+        params, size = MODEL_INFO.get(model, ("?", "?"))
+        ref.add_row(model, params, size)
+    console.print(ref)
 
     table = Table(title="Token Count per Ollama Model", show_lines=True)
     table.add_column("Model", style="cyan", no_wrap=True)
+    table.add_column("Params", justify="right")
     table.add_column("Tokens", justify="right", style="bold green")
 
     for model, count in results:
+        params, _ = MODEL_INFO.get(model, ("?", "?"))
         if isinstance(count, int):
-            table.add_row(model, str(count))
+            table.add_row(model, params, str(count))
         else:
-            table.add_row(model, f"[red]{count}[/red]")
+            table.add_row(model, params, f"[red]{count}[/red]")
 
     console.print(table)
     console.print("[dim]Note: counts include the BOS token (off by 1 vs raw subword count).[/dim]\n")
@@ -108,10 +120,19 @@ def print_md(text: str, source: str, results: list[tuple[str, int | str]]) -> No
     print(f"**Source:** {source}  ")
     print(f"**Length:** {len(text)} characters  ")
     print(f"**Text:** `{text[:120]}{'...' if len(text) > 120 else ''}`\n")
-    print("| Model | Tokens |")
-    print("|-------|-------:|")
+    print("### Models Under Test\n")
+    print("| Model | Params | Disk |")
+    print("|-------|-------:|-----:|")
+    for model, _ in results:
+        params, size = MODEL_INFO.get(model, ("?", "?"))
+        print(f"| `{model}` | {params} | {size} |")
+    print()
+    print("### Results\n")
+    print("| Model | Params | Tokens |")
+    print("|-------|-------:|-------:|")
     for model, count in results:
-        print(f"| `{model}` | {count} |")
+        params, _ = MODEL_INFO.get(model, ("?", "?"))
+        print(f"| `{model}` | {params} | {count} |")
     print("\n> Note: counts include the BOS token (off by 1 vs raw subword count).")
 
 

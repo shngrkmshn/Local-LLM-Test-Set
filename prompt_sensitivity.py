@@ -68,24 +68,24 @@ RESPONSE_PREVIEW = 220   # chars shown per response in non-full mode
 # Ollama query
 # ---------------------------------------------------------------------------
 
-def ask(model: str, prompt: str) -> str:
+def ask(model: str, prompt: str, num_predict: int = 300, num_ctx: int | None = None) -> str:
     try:
-        result = ollama.generate(
-            model=model,
-            prompt=prompt,
-            options={"num_predict": 300, "temperature": 0.7},
-        )
+        options: dict = {"num_predict": num_predict, "temperature": 0.7}
+        if num_ctx is not None:
+            options["num_ctx"] = num_ctx
+        result = ollama.generate(model=model, prompt=prompt, options=options)
         return result.response.strip()
     except Exception as exc:
         return f"ERROR: {exc}"
 
 
-def query_all_models(prompt: str, models: list[str]) -> dict[str, str]:
+def query_all_models(prompt: str, models: list[str],
+                     num_predict: int = 300, num_ctx: int | None = None) -> dict[str, str]:
     """Ask all models the same prompt in parallel."""
     results: dict[str, str] = {}
 
     def task(model):
-        return model, ask(model, prompt)
+        return model, ask(model, prompt, num_predict=num_predict, num_ctx=num_ctx)
 
     with ThreadPoolExecutor(max_workers=len(models)) as pool:
         for model, response in pool.map(task, models):
@@ -186,7 +186,11 @@ def parse_args():
     parser.add_argument("--file", type=Path, metavar="FILE",
                         help="Text file with one prompt per line")
     parser.add_argument("--md", action="store_true", help="Markdown output")
-    parser.add_argument("--full", action="store_true", help="Show full responses")
+    parser.add_argument("--full", action="store_true", help="Show full responses — sets num_predict=-1 so the model generates until it naturally stops")
+    parser.add_argument("--max-tokens", type=int, default=None, metavar="N",
+                        help="Max tokens to generate per response (default: 300, or 1024 with --full)")
+    parser.add_argument("--num-ctx", type=int, default=None, metavar="TOKENS",
+                        help="Context window size passed to Ollama (default: model default, ~4096)")
     return parser.parse_args()
 
 
@@ -199,9 +203,13 @@ def main():
         print("No prompts found.", file=sys.stderr)
         sys.exit(1)
 
+    # -1 = unlimited (model stops naturally); used for --full so nothing gets cut off
+    num_predict = args.max_tokens if args.max_tokens is not None else (-1 if args.full else 300)
+
     if not args.md:
         console = Console(highlight=False)
-        console.print(f"[dim]Running {len(prompts)} prompt(s) x {len(args.models)} model(s)...[/dim]\n")
+        console.print(f"[dim]Running {len(prompts)} prompt(s) x {len(args.models)} model(s) "
+                      f"(max_tokens={num_predict})...[/dim]\n")
 
     data: list[dict[str, str]] = []
     for i, prompt in enumerate(prompts, 1):
@@ -210,7 +218,7 @@ def main():
                 f"  [dim]Prompt {i}/{len(prompts)}: {prompt[:60]}{'...' if len(prompt) > 60 else ''}[/dim]",
                 end="\r",
             )
-        responses = query_all_models(prompt, args.models)
+        responses = query_all_models(prompt, args.models, num_predict=num_predict, num_ctx=args.num_ctx)
         data.append(responses)
 
     if not args.md:
