@@ -58,23 +58,28 @@ RESPONSE_PREVIEW = 300
 # Ollama query
 # ---------------------------------------------------------------------------
 
-def ask(model: str, prompt: str, num_predict: int = 300, temperature: float = 0.7) -> str:
+def ask(model: str, prompt: str, num_predict: int = 300, temperature: float = 0.7,
+        num_ctx: int | None = None) -> str:
     try:
+        options: dict = {"num_predict": num_predict, "temperature": temperature}
+        if num_ctx is not None:
+            options["num_ctx"] = num_ctx
         result = ollama.generate(
             model=model,
             prompt=prompt,
-            options={"num_predict": num_predict, "temperature": temperature},
+            options=options,
         )
         return result.response.strip()
     except Exception as exc:
         return f"ERROR: {exc}"
 
 
-def query_all_models(prompt: str, models: list[str], num_predict: int, temperature: float) -> dict[str, str]:
+def query_all_models(prompt: str, models: list[str], num_predict: int, temperature: float,
+                     num_ctx: int | None = None) -> dict[str, str]:
     results: dict[str, str] = {}
 
     def task(model):
-        return model, ask(model, prompt, num_predict, temperature)
+        return model, ask(model, prompt, num_predict, temperature, num_ctx)
 
     with ThreadPoolExecutor(max_workers=len(models)) as pool:
         for model, response in pool.map(task, models):
@@ -197,6 +202,10 @@ def parse_args():
         "--max-tokens", type=int, default=None, metavar="N",
         help="Max tokens per response (default: 300, or -1 with --full)",
     )
+    parser.add_argument(
+        "--num-ctx", type=int, default=None, metavar="TOKENS",
+        help="Context window size passed to Ollama (default: model default, ~4096)",
+    )
     return parser.parse_args()
 
 
@@ -228,7 +237,7 @@ def main():
                 f"  [dim]Prompt {i}/{len(prompts)}: {prompt[:60]}{'...' if len(prompt) > 60 else ''}[/dim]",
                 end="\r",
             )
-        responses = query_all_models(prompt, args.models, num_predict, args.temperature)
+        responses = query_all_models(prompt, args.models, num_predict, args.temperature, args.num_ctx)
         data.append(responses)
 
     if not args.md:
