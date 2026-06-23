@@ -68,7 +68,7 @@ def build_doc(target_words: int) -> str:
     return NEEDLE + " " + filler
 
 
-def run_check(model: str, doc: str) -> dict:
+def run_check(model: str, doc: str, num_predict: int = 80) -> dict:
     estimated_tokens = int(len(doc.split()) / WORDS_PER_TOKEN) + 64
     prompt = f"{doc}\n\n---\n\nAnswer using only information from the text above.\nQuestion: {QUESTION}"
 
@@ -76,7 +76,7 @@ def run_check(model: str, doc: str) -> dict:
         result = ollama.generate(
             model=model,
             prompt=prompt,
-            options={"num_predict": 80, "temperature": 0},
+            options={"num_predict": num_predict, "temperature": 0},
             # intentionally NO num_ctx
         )
         evaluated = getattr(result, "prompt_eval_count", None)
@@ -106,15 +106,19 @@ def parse_args():
         "--words", type=int, default=6_000, metavar="N",
         help="Approximate word count of the test document (default: 6 000, ~8 000 tokens)",
     )
+    parser.add_argument(
+        "--full", action="store_true",
+        help="Let models generate until they naturally stop (sets num_predict=-1).",
+    )
     return parser.parse_args()
 
 
-def collect_results(models: list[str], doc: str) -> list[dict]:
+def collect_results(models: list[str], doc: str, num_predict: int = 80) -> list[dict]:
     rows = []
     console = Console(highlight=False)
     for model in models:
         console.print(f"[dim]Querying {model}...[/dim]")
-        r = run_check(model, doc)
+        r = run_check(model, doc, num_predict=num_predict)
         r["model"] = model
         if r["evaluated_tokens"] is not None and not r["error"]:
             r["ratio"] = r["evaluated_tokens"] / r["estimated_tokens"]
@@ -218,7 +222,8 @@ def main():
     actual_words = len(doc.split())
     estimated_tokens = int(actual_words / WORDS_PER_TOKEN) + 64
 
-    rows = collect_results(args.models, doc)
+    num_predict = -1 if args.full else 80
+    rows = collect_results(args.models, doc, num_predict=num_predict)
     print_rich(actual_words, estimated_tokens, rows)
 
     out_dir = Path("outputs")

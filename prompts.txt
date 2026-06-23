@@ -1,10 +1,5 @@
-#neutral
- With the backs of your hands facing up, interlace your ten fingers together, pointing upwards. The fourth finger furthest from your body is your right ring finger. Now, turn your interlaced hands over so that your palms face up. Which finger is now the third closest to your body?
-#chain of thought
- With the backs of your hands facing up, interlace your ten fingers together, pointing upwards. The fourth finger furthest from your body is your right ring finger. Now, turn your interlaced hands over so that your palms face up. Which finger is now the third closest to your body? Think step by step.
-#expertise
-You are a spatial reasoning expert. You are complex multi-dimensional thinking, and you are expert at finding subtleties in questions.  With the backs of your hands facing up, interlace your ten fingers together, pointing upwards. The fourth finger furthest from your body is your right ring finger. Now, turn your interlaced hands over so that your palms face up. Which finger is now the third closest to your body?
-#correct leading
- With the backs of your hands facing up, interlace your ten fingers together, pointing upwards. The fourth finger furthest from your body is your right ring finger. Now, turn your interlaced hands over so that your palms face up. Which finger is now the third closest to your body?
-#incorrect leading
- With the backs of your hands facing up, interlace your ten fingers together, pointing upwards. The fourth finger furthest from your body is your left middle finger. Now, turn your interlaced hands over so that your palms face up. Which finger is now the third closest to your body?
+What is 15% of 80?
+What is 15% of 80? Answer in one word.
+Roughly what is 15% of 80?
+What is 15% of 80? Think step by step.
+A student calculated 15% of 80 and got 14. Is that right?

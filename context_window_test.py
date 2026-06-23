@@ -137,7 +137,8 @@ def build_document(target_words: int, position: str) -> str:
 # Ollama query
 # ---------------------------------------------------------------------------
 
-def ask_model(model: str, document: str, num_ctx: int | None = None) -> tuple[bool, str]:
+def ask_model(model: str, document: str, num_ctx: int | None = None,
+              num_predict: int = 150) -> tuple[bool, str]:
     """
     Send document + question to the model. Returns (found_needle, response_snippet).
     If num_ctx is None, estimates from document length (original behaviour).
@@ -158,7 +159,7 @@ def ask_model(model: str, document: str, num_ctx: int | None = None) -> tuple[bo
             model=model,
             prompt=prompt,
             options={
-                "num_predict": 150,
+                "num_predict": num_predict,
                 "num_ctx": ctx,
                 "temperature": 0,
             },
@@ -169,6 +170,17 @@ def ask_model(model: str, document: str, num_ctx: int | None = None) -> tuple[bo
         return found, snippet
     except Exception as exc:
         return False, f"ERROR: {exc}"
+
+
+def classify(found: bool, snippet: str) -> str:
+    if snippet.startswith("ERROR"):
+        return "ERR"
+    if found:
+        return "YES"
+    # Response too short to be a real answer — KV cache collapse or context overflow
+    if len(snippet) < 20:
+        return "TRN"
+    return "NO"
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +200,14 @@ def parse_args():
              "Example: --num-ctx 32768. Useful for testing a specific context window size. "
              "With a 16 GB VRAM GPU, 32768 is a safe start; 65536 is feasible for smaller models.",
     )
+    parser.add_argument(
+        "--dump-docs", action="store_true",
+        help="Save each constructed prompt to outputs/docs/ as a .txt file instead of querying models.",
+    )
+    parser.add_argument(
+        "--full", action="store_true",
+        help="Let models generate until they naturally stop (sets num_predict=-1).",
+    )
     return parser.parse_args()
 
 
@@ -205,7 +225,8 @@ def collect_results(args) -> dict[str, list[tuple[int, str, bool, str]]]:
             for pos in args.positions:
                 doc = docs[(length, pos)]
                 actual_words = len(doc.split())
-                found, snippet = ask_model(model, doc, num_ctx=args.num_ctx)
+                found, snippet = ask_model(model, doc, num_ctx=args.num_ctx,
+                                           num_predict=args.num_predict)
                 rows.append((actual_words, pos, found, snippet))
         all_results[model] = rows
     return all_results
@@ -236,14 +257,14 @@ def print_rich(args, all_results: dict) -> None:
         table.add_column("Found?", justify="center")
         table.add_column("Model response", max_width=72)
         for actual_words, pos, found, snippet in rows:
-            found_display = "[bold green]YES[/bold green]" if found else "[bold red]NO[/bold red]"
-            if "ERROR" in snippet:
-                found_display = "[yellow]ERR[/yellow]"
-            table.add_row(f"{actual_words:,}", pos, found_display, snippet)
+            label = classify(found, snippet)
+            colours = {"YES": "[bold green]YES[/bold green]", "NO": "[bold red]NO[/bold red]",
+                       "TRN": "[bold yellow]TRN[/bold yellow]", "ERR": "[yellow]ERR[/yellow]"}
+            table.add_row(f"{actual_words:,}", pos, colours[label], snippet)
         console.print(table)
         console.print()
 
-    console.print("[bold]Done.[/bold]  YES = model recalled ZEPHYR-4291 | NO = lost it | ERR = context overflow\n")
+    console.print("[bold]Done.[/bold]  YES = recalled | NO = lost it | TRN = response collapsed (context limit) | ERR = exception\n")
 
 
 def print_md(args, all_results: dict) -> None:
@@ -264,11 +285,11 @@ def print_md(args, all_results: dict) -> None:
         print("| Words | Position | Found? | Model Response |")
         print("|------:|----------|:------:|----------------|")
         for actual_words, pos, found, snippet in rows:
-            found_str = "YES" if found else ("ERR" if "ERROR" in snippet else "NO")
+            found_str = classify(found, snippet)
             safe = snippet.replace("|", "\\|")
             print(f"| {actual_words:,} | {pos} | {found_str} | {safe} |")
 
-    print("\n> YES = recalled ZEPHYR-4291 | NO = lost it | ERR = context overflow")
+    print("\n> YES = recalled | NO = lost it | TRN = response collapsed (context limit) | ERR = exception")
 
 
 def _save_md(prefix: str, content: str) -> None:
@@ -279,8 +300,34 @@ def _save_md(prefix: str, content: str) -> None:
     Console(highlight=False).print(f"[dim]Saved → {path}[/dim]")
 
 
+def dump_docs(args) -> None:
+    out_dir = Path("outputs") / "docs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    console = Console(highlight=False)
+    for length in args.lengths:
+        for pos in args.positions:
+            doc = build_document(length, pos)
+            prompt = (
+                f"{doc}\n\n"
+                f"---\n\n"
+                f"Answer using only information from the text above.\n"
+                f"Question: {NEEDLE_QUESTION}"
+            )
+            fname = out_dir / f"doc_{length}_{pos}.txt"
+            fname.write_text(prompt, encoding="utf-8")
+            word_count = len(doc.split())
+            console.print(f"[dim]Saved {word_count:,}-word ({pos}) prompt → {fname}[/dim]")
+    console.print(f"\n[bold]Done.[/bold] Open a file and paste its contents into the Ollama interface.")
+
+
 def main():
     args = parse_args()
+
+    args.num_predict = -1 if args.full else 150
+
+    if args.dump_docs:
+        dump_docs(args)
+        return
 
     if not args.md:
         console = Console(highlight=False)
